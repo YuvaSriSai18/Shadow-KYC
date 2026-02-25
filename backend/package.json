@@ -13,6 +13,8 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@storagehub-sdk/core": "^0.4.4",
+    "@storagehub-sdk/msp-client": "^0.4.4",
     "circomlibjs": "^0.1.7",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",

@@ -1,151 +1,152 @@
-/**
- * mspService.ts - MSP (Main Storage Provider) Client Service
- *
- * Establishes connection to DataHaven's Main Storage Provider (MSP) backend
- * for storage operations like buckets and file management.
- *
- * Uses the user's connected MetaMask wallet for SIWE authentication.
- *
- * Following official DataHaven SDK documentation:
- * https://docs.datahaven.xyz/store-and-retrieve-data/use-storagehub-sdk/get-started/#set-up-msp-service
- */
-
-import {
-  HealthStatus,
-  InfoResponse,
-  MspClient,
-  UserInfo,
-} from '@storagehub-sdk/msp-client';
+import { MspClient } from '@storagehub-sdk/msp-client';
+import type { HealthStatus, InfoResponse, UserInfo, ValueProp } from '@storagehub-sdk/msp-client';
 import type { HttpClientConfig } from '@storagehub-sdk/core';
 import { getConnectedAddress, getWalletClient } from './clientService';
-import { NETWORK } from './networks';
+import { NETWORKS } from '@/config/networks';
 
-// ────────────────────────────────────────────────────────────────────────────
-// Configuration & Session State
-// ────────────────────────────────────────────────────────────────────────────
+// Storage keys
+const SESSION_TOKEN_KEY = 'datahaven_session_token';
+const USER_PROFILE_KEY = 'datahaven_user_profile';
 
-// Configure the HTTP client to point to the MSP backend
-const httpCfg: HttpClientConfig = { baseUrl: NETWORK.mspUrl };
-
-// Initialize a session token for authenticated requests (updated after authentication
-// through SIWE)
+// State
+let mspClientInstance: MspClient | null = null;
 let sessionToken: string | undefined = undefined;
+let authenticatedUserProfile: UserInfo | null = null;
 
-// MSP Client instance
-let mspClient: MspClient | null = null;
+// Initialize state from storage
+function initFromStorage() {
+  if (typeof window === 'undefined') return;
 
-// ────────────────────────────────────────────────────────────────────────────
-// Session Provider
-// ────────────────────────────────────────────────────────────────────────────
+  const storedToken = sessionStorage.getItem(SESSION_TOKEN_KEY);
+  const storedProfile = sessionStorage.getItem(USER_PROFILE_KEY);
 
-/**
- * Provide session information to the MSP client whenever available.
- * Returns a token and user address if authenticated, otherwise undefined.
- */
+  if (storedToken) {
+    sessionToken = storedToken;
+  }
+  if (storedProfile) {
+    try {
+      authenticatedUserProfile = JSON.parse(storedProfile);
+    } catch {
+      // Invalid stored profile, ignore
+    }
+  }
+}
+
+// Initialize on module load
+initFromStorage();
+
+// Session provider for authenticated requests
 const sessionProvider = async () => {
   const address = getConnectedAddress();
-  return sessionToken && address
-    ? ({ token: sessionToken, user: { address } } as const)
-    : undefined;
+  return sessionToken && address ? ({ token: sessionToken, user: { address } } as const) : undefined;
 };
 
-// ────────────────────────────────────────────────────────────────────────────
-// MSP Client Initialization
-// ────────────────────────────────────────────────────────────────────────────
-
-/**
- * Initialize the MSP client connection.
- * Called lazily when first needed.
- */
-async function initializeMspClient(): Promise<MspClient> {
-  if (mspClient) {
-    return mspClient;
+// Connect to MSP
+export async function connectToMsp(): Promise<MspClient> {
+  if (mspClientInstance) {
+    return mspClientInstance;
   }
 
-  mspClient = await MspClient.connect(httpCfg, sessionProvider);
-  console.log('[MSP] Client initialized and connected');
-
-  return mspClient;
+  const httpCfg: HttpClientConfig = { baseUrl: NETWORKS.testnet.mspUrl };
+  mspClientInstance = await MspClient.connect(httpCfg, sessionProvider);
+  return mspClientInstance;
 }
 
-/**
- * Get or create the MSP client.
- */
-export async function getMspClient(): Promise<MspClient> {
-  if (!mspClient) {
-    await initializeMspClient();
+// Get MSP client instance
+export function getMspClient(): MspClient {
+  if (!mspClientInstance) {
+    throw new Error('MSP client not connected. Please connect to MSP first.');
   }
-  return mspClient!;
+  return mspClientInstance;
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// MSP Operations
-// ────────────────────────────────────────────────────────────────────────────
+// Check if MSP is connected
+export function isMspConnected(): boolean {
+  return mspClientInstance !== null;
+}
 
-/**
- * Retrieve MSP metadata, including its unique ID and version.
- * Used to get MSP info for storage operations.
- */
-export const getMspInfo = async (): Promise<InfoResponse> => {
-  const client = await getMspClient();
-  const mspInfo = await client.info.getInfo();
-  console.log(`[MSP] ID: ${mspInfo.mspId}`);
-  return mspInfo;
-};
+// Get MSP health status
+export async function getMspHealth(): Promise<HealthStatus> {
+  const client = getMspClient();
+  const health = await client.info.getHealth();
+  return health;
+}
 
-/**
- * Retrieve and log the MSP's current health status.
- * Useful for checking if the storage provider is operational.
- */
-export const getMspHealth = async (): Promise<HealthStatus> => {
-  const client = await getMspClient();
-  const mspHealth = await client.info.getHealth();
-  console.log(`[MSP] Health: ${JSON.stringify(mspHealth)}`);
-  return mspHealth;
-};
+// Get MSP information
+export async function getMspInfo(): Promise<InfoResponse> {
+  const client = getMspClient();
+  const info = await client.info.getInfo();
+  return info;
+}
 
-/**
- * Authenticate the user via SIWE (Sign-In With Ethereum) using the connected MetaMask wallet.
- * Once authenticated, stores the returned session token and retrieves the user's profile.
- */
-export const authenticateUser = async (): Promise<UserInfo> => {
-  console.log('[MSP] Authenticating user with MSP via SIWE...');
+// Authenticate user via SIWE
+export async function authenticateUser(): Promise<UserInfo> {
+  const client = getMspClient();
+  const walletClient = getWalletClient();
 
-  const walletClient = await getWalletClient();
-  const address = getConnectedAddress();
-
-  if (!address) {
-    throw new Error('[MSP] Wallet not connected. Please connect MetaMask first.');
-  }
-
-  // In development, domain and uri can be arbitrary placeholders,
-  // but in production, they must match your actual frontend origin.
+  // In development domain and uri can be arbitrary placeholders,
+  // but in production they must match your actual frontend origin.
   const domain = window.location.hostname || 'localhost';
   const uri = window.location.origin || 'http://localhost';
 
-  const client = await getMspClient();
   const siweSession = await client.auth.SIWE(walletClient, domain, uri);
-  console.log('[MSP] SIWE Session:', siweSession);
   sessionToken = (siweSession as { token: string }).token;
 
   const profile: UserInfo = await client.auth.getProfile();
-  console.log('[MSP] User Profile:', profile);
+  authenticatedUserProfile = profile;
+
+  // Persist to session storage
+  if (typeof window !== 'undefined') {
+    sessionStorage.setItem(SESSION_TOKEN_KEY, sessionToken);
+    sessionStorage.setItem(USER_PROFILE_KEY, JSON.stringify(profile));
+  }
+
   return profile;
-};
+}
 
-/**
- * Clear the session token (logout).
- * 
- * Clears the cached session token so the next operation will require re-authentication.
- */
-export const clearSession = (): void => {
-  console.log('[MSP] Clearing session token');
+// Get value propositions
+export async function getValueProps(): Promise<`0x${string}`> {
+  const client = getMspClient();
+  const valueProps: ValueProp[] = await client.info.getValuePropositions();
+
+  if (!Array.isArray(valueProps) || valueProps.length === 0) {
+    throw new Error('No value propositions available from MSP');
+  }
+
+  // For simplicity, select the first value proposition
+  const valuePropId = valueProps[0].id as `0x${string}`;
+  return valuePropId;
+}
+
+// Check if user is authenticated
+export function isAuthenticated(): boolean {
+  return sessionToken !== undefined && authenticatedUserProfile !== null;
+}
+
+// Get authenticated user profile
+export function getUserProfile(): UserInfo | null {
+  return authenticatedUserProfile;
+}
+
+// Clear auth session (used when server returns 401)
+export function clearSession() {
   sessionToken = undefined;
-};
+  authenticatedUserProfile = null;
 
-// ────────────────────────────────────────────────────────────────────────────
-// Export MSP Client getter for direct access
-// ────────────────────────────────────────────────────────────────────────────
+  if (typeof window !== 'undefined') {
+    sessionStorage.removeItem(SESSION_TOKEN_KEY);
+    sessionStorage.removeItem(USER_PROFILE_KEY);
+  }
+}
 
-// For backward compatibility, export a promise that resolves to the client
-export { getMspClient as mspClient };
+// Check if an error is a 401 auth error
+export function isAuthError(error: unknown): boolean {
+  const err = error as { status?: number; response?: { status?: number } };
+  return err?.status === 401 || err?.response?.status === 401;
+}
+
+// Reset MSP connection
+export function disconnectMsp() {
+  mspClientInstance = null;
+  clearSession();
+}

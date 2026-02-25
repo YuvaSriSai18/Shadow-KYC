@@ -1,239 +1,267 @@
-/**
- * clientService.ts - DataHaven StorageHub SDK Client Initialization
- *
- * Connects to user's MetaMask wallet and initializes DataHaven clients.
- * Automatically detects and connects to MetaMask in the background.
- *
- * Following official DataHaven SDK documentation:
- * https://docs.datahaven.xyz/store-and-retrieve-data/use-storagehub-sdk/get-started/
- */
-
-import {
-  createPublicClient,
-  createWalletClient,
-  http,
-  custom,
-  type WalletClient,
-  type Account,
-} from 'viem';
+import { defineChain, createPublicClient, createWalletClient, http, custom } from 'viem';
+import type { Chain, EIP1193Provider } from 'viem';
 import { StorageHubClient } from '@storagehub-sdk/core';
-import { ApiPromise, WsProvider, Keyring } from '@polkadot/api';
+import type { EvmWriteOptions } from '@storagehub-sdk/core';
+import { ApiPromise, WsProvider } from '@polkadot/api';
 import { types } from '@storagehub/types-bundle';
-import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { NETWORK, chain } from './networks';
+import {NETWORKS} from "../config/networks" ;
 
-// ────────────────────────────────────────────────────────────────────────────
-// MetaMask Wallet Detection & Connection
-// ────────────────────────────────────────────────────────────────────────────
+// Storage key
+const CONNECTED_ADDRESS_KEY = 'datahaven_connected_address';
 
-let connectedAddress: string | null = null;
-let walletClient: WalletClient | null = null;
-let publicClient = createPublicClient({
-  chain,
-  transport: http(NETWORK.rpcUrl),
+// Define the chain configuration
+export const chain: Chain = defineChain({
+  id: NETWORKS.testnet.id,
+  name: NETWORKS.testnet.name,
+  nativeCurrency: NETWORKS.testnet.nativeCurrency,
+  rpcUrls: { default: { http: [NETWORKS.testnet.rpcUrl] } },
 });
 
-/**
- * Detect and connect to MetaMask wallet.
- * Called automatically on app load.
- */
-async function initializeEthereumConnection(): Promise<{
-  address: string;
-  walletClient: WalletClient;
-  publicClient: typeof publicClient;
-} | null> {
-  // Check if MetaMask is installed
-  if (!window.ethereum) {
-    console.warn('[CLIENT] MetaMask not detected. Please install MetaMask to use this app.');
-    return null;
+// State for connected clients
+let walletClientInstance: ReturnType<typeof createWalletClient> | null = null;
+let publicClientInstance: ReturnType<typeof createPublicClient> | null = null;
+let storageHubClientInstance: StorageHubClient | null = null;
+let polkadotApiInstance: ApiPromise | null = null;
+let connectedAddress: `0x${string}` | null = null;
+
+// Initialize address from storage
+function initFromStorage() {
+  if (typeof window === 'undefined') return;
+
+  const storedAddress = sessionStorage.getItem(CONNECTED_ADDRESS_KEY);
+  if (storedAddress) {
+    connectedAddress = storedAddress as `0x${string}`;
   }
+}
+
+// Initialize on module load
+initFromStorage();
+
+// Get ethereum provider from window
+function getEthereumProvider(): EIP1193Provider {
+  if (typeof window === 'undefined' || !window.ethereum) {
+    throw new Error('No Ethereum wallet found. Please install MetaMask or another Web3 wallet.');
+  }
+  return window.ethereum as EIP1193Provider;
+}
+
+// Create public client (read-only, always available)
+export function getPublicClient() {
+  if (!publicClientInstance) {
+    publicClientInstance = createPublicClient({
+      chain,
+      transport: http(NETWORKS.testnet.rpcUrl),
+    });
+  }
+  return publicClientInstance;
+}
+
+// Switch wallet to the correct network
+async function switchToCorrectNetwork(provider: EIP1193Provider): Promise<void> {
+  const chainIdHex = NETWORKS.testnet.idHex;
 
   try {
-    // Request wallet access
-    const accounts = await window.ethereum.request({
-      method: 'eth_requestAccounts',
-    }) as string[];
-
-    if (!accounts || accounts.length === 0) {
-      throw new Error('No wallet accounts available');
-    }
-
-    const userAddress = accounts[0];
-    connectedAddress = userAddress;
-
-    console.log('[CLIENT] Connected to MetaMask wallet:', userAddress);
-
-    // Create wallet client that uses MetaMask provider
-    const wallet: WalletClient = createWalletClient({
-      chain,
-      transport: custom({
-        async request(request) {
-          return window.ethereum!.request(request as any) as Promise<any>;
-        },
-      }),
+    // Try to switch to the network
+    await provider.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: chainIdHex }],
     });
-
-    walletClient = wallet;
-
-    return {
-      address: userAddress,
-      walletClient: wallet,
-      publicClient,
-    };
-  } catch (error) {
-    console.error('[CLIENT] Failed to connect MetaMask:', error);
-    return null;
+  } catch (switchError: unknown) {
+    // Error code 4902 means the chain hasn't been added to the wallet
+    const error = switchError as { code?: number };
+    if (error.code === 4902) {
+      // Add the network to the wallet
+      await provider.request({
+        method: 'wallet_addEthereumChain',
+        params: [
+          {
+            chainId: chainIdHex,
+            chainName: NETWORKS.testnet.name,
+            nativeCurrency: NETWORKS.testnet.nativeCurrency,
+            rpcUrls: [NETWORKS.testnet.rpcUrl],
+          },
+        ],
+      });
+    } else {
+      throw switchError;
+    }
   }
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Initialize StorageHub Client (SDK wrapper for precompiles)
-// ────────────────────────────────────────────────────────────────────────────
+// Connect wallet using browser extension (MetaMask, etc.)
+export async function connectWallet(): Promise<`0x${string}`> {
+  const provider = getEthereumProvider();
 
-let storageHubClient: StorageHubClient | null = null;
+  // Request account access
+  const accounts = (await provider.request({
+    method: 'eth_requestAccounts',
+    params: [],
+  })) as string[];
 
-async function initializeStorageHubClient() {
-  if (!walletClient) {
-    throw new Error('[CLIENT] Wallet client not initialized. Connect MetaMask first.');
+  if (!accounts || accounts.length === 0) {
+    throw new Error('No accounts found. Please connect your wallet.');
   }
 
-  storageHubClient = new StorageHubClient({
-    rpcUrl: NETWORK.rpcUrl,
-    chain: chain,
-    walletClient: walletClient,
-    filesystemContractAddress: NETWORK.filesystemContractAddress,
+  // Switch to the correct network
+  await switchToCorrectNetwork(provider);
+
+  connectedAddress = accounts[0] as `0x${string}`;
+
+  // Create wallet client with browser wallet
+  walletClientInstance = createWalletClient({
+    chain,
+    account: connectedAddress,
+    transport: custom(provider),
   });
 
-  return storageHubClient;
-}
+  // Create StorageHub client
+  storageHubClientInstance = new StorageHubClient({
+    rpcUrl: NETWORKS.testnet.rpcUrl,
+    chain: chain,
+    walletClient: walletClientInstance,
+    filesystemContractAddress: '0x0000000000000000000000000000000000000404' as `0x${string}`,
+  });
 
-// ────────────────────────────────────────────────────────────────────────────
-// Initialize Substrate Path (Polkadot.js)
-// ────────────────────────────────────────────────────────────────────────────
+  // Persist to session storage
+  if (typeof window !== 'undefined') {
+    sessionStorage.setItem(CONNECTED_ADDRESS_KEY, connectedAddress);
+  }
 
-await cryptoWaitReady();
-
-const provider = new WsProvider(NETWORK.wsUrl);
-const polkadotApi: ApiPromise = await ApiPromise.create({
-  provider,
-  typesBundle: types,
-  noInitWarn: true,
-});
-
-// Note: Substrate signer would be the same wallet address derived from Ethereum
-// For now, we'll use the Ethereum address as the Polkadot account
-
-// ────────────────────────────────────────────────────────────────────────────
-// Frontend Wallet Connection Helpers
-// ────────────────────────────────────────────────────────────────────────────
-
-/**
- * Get the currently connected wallet address.
- * Returns null if wallet not connected.
- */
-export function getConnectedAddress(): string | null {
   return connectedAddress;
 }
 
-/**
- * Connect to MetaMask wallet.
- * Called automatically or when user clicks "Connect Wallet" button.
- */
-export async function connectWallet(): Promise<string> {
-  const result = await initializeEthereumConnection();
-  if (!result) {
-    throw new Error('Failed to connect MetaMask wallet');
+// Initialize Polkadot API for chain queries
+export async function initPolkadotApi(): Promise<ApiPromise> {
+  if (polkadotApiInstance) {
+    return polkadotApiInstance;
   }
 
-  await initializeStorageHubClient();
-  return result.address;
+  const provider = new WsProvider(NETWORKS.testnet.wsUrl);
+  polkadotApiInstance = await ApiPromise.create({
+    provider,
+    typesBundle: types,
+    noInitWarn: true,
+  });
+
+  return polkadotApiInstance;
 }
 
-/**
- * Disconnect wallet (clears cached address).
- */
-export function disconnectWallet(): void {
-  connectedAddress = null;
-  walletClient = null;
-  storageHubClient = null;
-  console.log('[CLIENT] Wallet disconnected');
-}
-
-/**
- * Get the active wallet client (uses MetaMask).
- * Ensures wallet is connected first.
- */
-export async function getWalletClient(): Promise<WalletClient> {
-  if (!walletClient) {
-    // Auto-connect if not already connected
-    const result = await initializeEthereumConnection();
-    if (!result) {
-      throw new Error('MetaMask not available');
-    }
+// Getters for client instances
+export function getWalletClient() {
+  if (!walletClientInstance) {
+    throw new Error('Wallet not connected. Please connect your wallet first.');
   }
-  return walletClient!;
+  return walletClientInstance;
 }
 
-/**
- * Get or initialize the StorageHub client.
- */
-export async function getStorageHubClient(): Promise<StorageHubClient> {
-  if (!storageHubClient) {
-    await initializeStorageHubClient();
+export function getStorageHubClient() {
+  if (!storageHubClientInstance) {
+    throw new Error('StorageHub client not initialized. Please connect your wallet first.');
   }
-  return storageHubClient!;
+  return storageHubClientInstance;
 }
 
-/**
- * Get the public client for reading state.
- */
-export function getPublicClient() {
-  return publicClient;
-}
-
-/**
- * Get the Polkadot API instance.
- */
 export function getPolkadotApi() {
-  return polkadotApi;
+  if (!polkadotApiInstance) {
+    throw new Error('Polkadot API not initialized. Please initialize it first.');
+  }
+  return polkadotApiInstance;
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Auto-initialize on app load
-// ────────────────────────────────────────────────────────────────────────────
+export function getConnectedAddress() {
+  return connectedAddress;
+}
 
-/**
- * Initialize wallet connection on app startup.
- * This happens in the background without blocking the app.
- */
-export async function initializeApp(): Promise<void> {
+export function isWalletConnected() {
+  return walletClientInstance !== null && connectedAddress !== null;
+}
+
+// Restore wallet connection from persisted state (call this on app init)
+export async function restoreWalletConnection(): Promise<`0x${string}` | null> {
+  // Check if we have a persisted address
+  if (!connectedAddress) {
+    return null;
+  }
+
   try {
-    // Try to auto-connect if MetaMask is available
-    if (window.ethereum) {
-      const result = await initializeEthereumConnection();
-      if (result) {
-        console.log('[CLIENT] Auto-connected to MetaMask:', result.address);
-        try {
-          // Also initialize StorageHub if wallet is connected
-          await initializeStorageHubClient();
-        } catch (err) {
-          console.warn('[CLIENT] StorageHub client init deferred:', err);
-        }
-      }
+    const provider = getEthereumProvider();
+
+    // Check if wallet is still connected by getting accounts (without prompting)
+    const accounts = (await provider.request({
+      method: 'eth_accounts',
+      params: [],
+    })) as string[];
+
+    // Check if our persisted address is still among connected accounts
+    const addressLower = connectedAddress.toLowerCase();
+    const isStillConnected = accounts.some((acc) => acc.toLowerCase() === addressLower);
+
+    if (!isStillConnected) {
+      // Wallet is no longer connected, clear persisted state
+      disconnectWallet();
+      return null;
     }
-  } catch (error) {
-    // Non-blocking - user can still use the app, just needs to connect wallet
-    console.log('[CLIENT] App initialized (wallet connection optional)');
+
+    // Switch to the correct network
+    await switchToCorrectNetwork(provider);
+
+    // Re-establish wallet client
+    walletClientInstance = createWalletClient({
+      chain,
+      account: connectedAddress,
+      transport: custom(provider),
+    });
+
+    // Re-create StorageHub client
+    storageHubClientInstance = new StorageHubClient({
+      rpcUrl: NETWORKS.testnet.rpcUrl,
+      chain: chain,
+      walletClient: walletClientInstance,
+      filesystemContractAddress: '0x0000000000000000000000000000000000000404' as `0x${string}`,
+    });
+
+    return connectedAddress;
+  } catch {
+    // Failed to restore, clear state
+    disconnectWallet();
+    return null;
   }
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Exports
-// ────────────────────────────────────────────────────────────────────────────
+// Disconnect wallet
+export function disconnectWallet() {
+  walletClientInstance = null;
+  storageHubClientInstance = null;
+  connectedAddress = null;
 
-export {
-  connectedAddress as address,
-  publicClient,
-  polkadotApi,
-  getStorageHubClient as storageHubClient,
-};
+  // Clear session storage
+  if (typeof window !== 'undefined') {
+    sessionStorage.removeItem(CONNECTED_ADDRESS_KEY);
+  }
+}
+
+// Disconnect Polkadot API
+export async function disconnectPolkadotApi() {
+  if (polkadotApiInstance) {
+    await polkadotApiInstance.disconnect();
+    polkadotApiInstance = null;
+  }
+}
+
+// Build gas transaction options based on current network conditions
+export async function buildGasTxOpts(): Promise<EvmWriteOptions> {
+  const publicClient = getPublicClient();
+  const gas = BigInt('1500000');
+
+  // EIP-1559 fees based on latest block
+  const latestBlock = await publicClient.getBlock({ blockTag: 'latest' });
+  const baseFeePerGas = latestBlock.baseFeePerGas;
+  if (baseFeePerGas == null) {
+    throw new Error('RPC did not return baseFeePerGas for the latest block. Cannot build EIP-1559 fees.');
+  }
+
+  const maxPriorityFeePerGas = BigInt('1500000000'); // 1.5 gwei
+  const maxFeePerGas = baseFeePerGas * BigInt(2) + maxPriorityFeePerGas;
+
+  return { gas, maxFeePerGas, maxPriorityFeePerGas };
+}

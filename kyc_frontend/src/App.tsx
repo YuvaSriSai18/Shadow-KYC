@@ -7,19 +7,22 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ThirdwebProvider } from "@thirdweb-dev/react";
 import { Navigation } from "@/components/Navigation";
 import { DarkModeToggle } from "@/components/DarkModeToggle";
-import { initializeApp } from "@/services/clientService";
+import { restoreWalletConnection } from "@/services/clientService";
 import Home from "./pages/Home";
 import Profile from "./pages/Profile";
 import KYCDashboard from "./pages/KYCDashboard";
 import ZKProof from "./pages/ZKProof";
+import ServiceTest from "./pages/ServiceTest";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
 const App = () => {
-  // Auto-connect MetaMask wallet on app load
+  // Auto-restore wallet connection on app load
   useEffect(() => {
-    initializeApp();
+    restoreWalletConnection().catch((err) => {
+      console.log('[App] No existing wallet session to restore:', err.message);
+    });
   }, []);
 
   return (
@@ -39,6 +42,7 @@ const App = () => {
                 <Route path="/profile" element={<Profile />} />
                 <Route path="/kyc" element={<KYCDashboard />} />
                 <Route path="/zkproof" element={<ZKProof />} />
+                <Route path="/test-services" element={<ServiceTest />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </div>

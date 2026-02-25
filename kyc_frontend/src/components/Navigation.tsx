@@ -10,7 +10,6 @@ import {
   getConnectedAddress,
 } from '@/services/clientService';
 import { clearSession } from '@/services/mspService';
-import { NETWORKS } from '@/services/networks';
 
 const navItems = [
   { to: '/', label: 'Home', icon: Home },
@@ -37,7 +36,7 @@ export const Navigation = () => {
     try {
       const address = await clientConnect();
       setWalletAddress(address);
-      toast({ title: 'Wallet Connected', description: `Connected on ${NETWORKS.sepolia.name}` });
+      toast({ title: 'Wallet Connected', description: 'Wallet connected successfully' });
     } catch (err: any) {
       toast({ title: 'Connection Failed', description: err?.message ?? 'Failed to connect', variant: 'destructive' });
     } finally {
