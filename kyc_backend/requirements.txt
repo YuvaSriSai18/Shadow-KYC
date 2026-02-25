@@ -1,0 +1,12 @@
+fastapi[standard]
+uvicorn[standard]
+lxml
+pydantic
+requests
+python-dotenv
+deepface
+opencv-python
+numpy
+Pillow
+tensorflow
+tf-keras
