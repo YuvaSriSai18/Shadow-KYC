@@ -147,6 +147,10 @@ export async function initPolkadotApi(): Promise<ApiPromise> {
 }
 
 // Getters for client instances
+export function isPolkadotApiReady(): boolean {
+  return polkadotApiInstance !== null;
+}
+
 export function getWalletClient() {
   if (!walletClientInstance) {
     throw new Error('Wallet not connected. Please connect your wallet first.');

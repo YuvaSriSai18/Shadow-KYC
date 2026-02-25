@@ -173,34 +173,45 @@ const KYCDashboard = () => {
         `🎉 ZK proof generated successfully! Credential Hash: ${credentialHash.toString().substring(0, 10)}...`
       );
 
-      // ── Store extracted data on DataHaven Testnet ──────────────────
+      // ── Store full KYC data on DataHaven Testnet ───────────────────
       if (aadhaarUploadResult?.extractedData) {
         setIsStoringData(true);
-        toast.info("Preparing secure DataHaven storage… (Please sign any MetaMask prompts)");
+        toast.info("Storing KYC data on DataHaven… (Please sign any MetaMask prompts)");
         try {
           const extracted = aadhaarUploadResult.extractedData;
-          console.log(
-            "[KYCDashboard] Starting DataHaven storage with extracted data:",
-            { name: extracted.name, dob: extracted.dob, gender: extracted.gender }
-          );
-          
+
           const storageRes = await storeKycDataOnDataHaven({
-            name: extracted.name ?? "",
-            dob: extracted.dob ?? "",
-            gender: extracted.gender ?? "",
-            state: (extracted.address && extracted.address.state) ?? "",
+            aadhaarData: {
+              fileName: aadhaarUploadResult.fileName,
+              uploadedAt: aadhaarUploadResult.uploadedAt instanceof Date
+                ? aadhaarUploadResult.uploadedAt.toISOString()
+                : String(aadhaarUploadResult.uploadedAt),
+              extractedData: {
+                name: extracted.name ?? "",
+                dob: extracted.dob ?? "",
+                gender: extracted.gender ?? "",
+                state: extracted.address?.state ?? "",
+              },
+            },
+            images: {
+              aadhaarImage: faceVerificationResult?.aadhaarImage
+                ?? aadhaarUploadResult.extractedPhoto
+                ?? "",
+              liveImage: faceVerificationResult?.liveImage ?? "",
+              passportImage: faceVerificationResult?.passportImage ?? "",
+            },
           });
-          
+
           setStorageResult(storageRes);
-          
+
           toast.success(
-            `✅ KYC data securely stored on DataHaven! BucketID: ${storageRes.bucketId}`,
+            `✅ KYC data securely stored on DataHaven!`,
             {
-              description: `File: ${storageRes.fileKey} | Authenticated: ${storageRes.authenticated ? "Yes" : "No"}`,
+              description: `Bucket: ${storageRes.bucketId.slice(0, 18)}… | File: ${storageRes.fileKey.slice(0, 18)}…`,
               duration: 5000,
             }
           );
-          
+
           console.log("[KYCDashboard] DataHaven storage completed:", {
             bucketId: storageRes.bucketId,
             fileKey: storageRes.fileKey,
@@ -213,14 +224,9 @@ const KYCDashboard = () => {
             "[KYCDashboard] DataHaven storage failed (non-blocking):",
             storageErrorMsg
           );
-          
-          // Non-blocking warning — prove generation completed successfully
           toast.warning(
             "⚠️ DataHaven storage temporarily unavailable",
-            {
-              description: storageErrorMsg,
-              duration: 4000,
-            }
+            { description: storageErrorMsg, duration: 4000 }
           );
         } finally {
           setIsStoringData(false);

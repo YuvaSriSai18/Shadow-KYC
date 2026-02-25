@@ -13,6 +13,7 @@ import {
   getStorageHubClient,
   initPolkadotApi,
   isWalletConnected,
+  isPolkadotApiReady,
   restoreWalletConnection,
 } from './clientService';
 import {
@@ -21,6 +22,7 @@ import {
   isAuthenticated,
   getMspInfo,
   getValueProps,
+  isMspConnected,
 } from './mspService';
 import type { KYCDataToStore, StorageResult } from '../types';
 
@@ -62,21 +64,32 @@ export async function storeKycDataOnDataHaven(
 
   try {
     // ────────────────────────────────────────────────────────────────────────────
-    // STEP 1: Ensure all services are initialized
+    // STEP 1: Ensure all services are initialized (each check is idempotent)
     // ────────────────────────────────────────────────────────────────────────────
-    console.log('[StorageService] STEP 1: Checking services...');
-    
-    const address = getConnectedAddress();
-    if (!address) {
-      console.log('[StorageService] Wallet not connected, initializing...');
-      await initializeStorageServices();
+    console.log('[StorageService] STEP 1: Ensuring all services are ready...');
+
+    // 1a. Wallet
+    if (!isWalletConnected()) {
+      console.log('[StorageService] Wallet not connected, connecting...');
+      await connectWallet();
     }
-    
     const walletAddress = getConnectedAddress();
-    if (!walletAddress) {
-      throw new Error('Wallet not connected');
+    if (!walletAddress) throw new Error('Wallet not connected');
+    console.log('[StorageService] ✓ Wallet:', walletAddress);
+
+    // 1b. Polkadot API (needed for on-chain bucket creation)
+    if (!isPolkadotApiReady()) {
+      console.log('[StorageService] Polkadot API not ready, initializing...');
+      await initPolkadotApi();
     }
-    console.log('[StorageService] ✓ Wallet connected:', walletAddress);
+    console.log('[StorageService] ✓ Polkadot API ready');
+
+    // 1c. MSP client
+    if (!isMspConnected()) {
+      console.log('[StorageService] MSP not connected, connecting...');
+      await connectToMsp();
+    }
+    console.log('[StorageService] ✓ MSP connected');
 
     // ────────────────────────────────────────────────────────────────────────────
     // STEP 2: Authenticate with SIWE
@@ -125,10 +138,11 @@ export async function storeKycDataOnDataHaven(
     console.log('[StorageService] STEP 4: Uploading KYC data...');
     
     const kycFileContent = JSON.stringify({
-      personal: kycData,
+      aadhaarData: kycData.aadhaarData,
+      images: kycData.images,
       metadata: {
         timestamp,
-        version: '1.0',
+        version: '2.0',
         owner: walletAddress,
       },
     }, null, 2);
@@ -181,10 +195,21 @@ export async function testBucketAndFileUpload(): Promise<StorageResult> {
   console.log('[StorageService] Testing bucket creation and file upload...');
   
   const testData: KYCDataToStore = {
-    name: 'Test User',
-    dob: '1990-01-15',
-    gender: 'M',
-    state: 'California',
+    aadhaarData: {
+      fileName: 'test-aadhaar.zip',
+      uploadedAt: new Date().toISOString(),
+      extractedData: {
+        name: 'Test User',
+        dob: '1990-01-15',
+        gender: 'M',
+        state: 'California',
+      },
+    },
+    images: {
+      aadhaarImage: 'data:image/png;base64,TEST_AADHAAR_IMAGE',
+      liveImage: 'data:image/png;base64,TEST_LIVE_IMAGE',
+      passportImage: 'data:image/png;base64,TEST_PASSPORT_IMAGE',
+    },
   };
 
   return storeKycDataOnDataHaven(testData);

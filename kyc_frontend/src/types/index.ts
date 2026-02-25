@@ -32,10 +32,21 @@ export interface BucketInfo {
 
 // KYC data structure for storage
 export interface KYCDataToStore {
-  name: string;
-  dob: string;
-  gender: string;
-  state: string;
+  aadhaarData: {
+    fileName: string;
+    uploadedAt: string;
+    extractedData: {
+      name: string;
+      dob: string;
+      gender: string;
+      state: string;
+    };
+  };
+  images: {
+    aadhaarImage: string;  // base64
+    liveImage: string;     // base64
+    passportImage: string; // base64
+  };
 }
 
 // Storage result
