@@ -1,51 +1,49 @@
-require("@nomicfoundation/hardhat-toolbox");
-require("@nomicfoundation/hardhat-ethers");
-require("hardhat-gas-reporter");
-require("solidity-coverage");
-require("@nomiclabs/hardhat-etherscan");
+require("@matterlabs/hardhat-zksync-solc");
+require("@matterlabs/hardhat-zksync-verify");
+
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
+  zksolc: {
+    version: "1.4.1",
+    compilerSource: "binary",
+    settings: {
+      optimizer: {
+        enabled: true,
+      },
+    },
+  },
+  networks: {
+    zkSyncSepoliaTestnet: {
+      url: "https://sepolia.era.zksync.dev",
+      ethNetwork: "sepolia",
+      zksync: true,
+      chainId: 300,
+      verifyURL:
+        "https://explorer.sepolia.era.zksync.dev/contract_verification",
+    },
+    zkSyncMainnet: {
+      url: "https://mainnet.era.zksync.io",
+      ethNetwork: "mainnet",
+      zksync: true,
+      chainId: 324,
+      verifyURL:
+        "https://zksync2-mainnet-explorer.zksync.io/contract_verification",
+    },
+  },
+  paths: {
+    artifacts: "./artifacts-zk",
+    cache: "./cache-zk",
+    sources: "./contracts",
+    tests: "./test",
+  },
   solidity: {
-    version: "0.8.20",
+    version: "0.8.23",
     settings: {
       optimizer: {
         enabled: true,
         runs: 200,
       },
     },
-  },
-
-  networks: {
-    sepolia: {
-      url: process.env.SEPOLIA_RPC_URL || "https://sepolia.infura.io/v3/",
-      accounts: process.env.WALLET_PRIVATE_KEY
-        ? [process.env.WALLET_PRIVATE_KEY]
-        : [],
-      chainId: 11155111,
-    },
-    localhost: {
-      url: "http://127.0.0.1:8545",
-    },
-    hardhat: {
-      chainId: 31337,
-    },
-  },
-
-  etherscan: {
-    apiKey: process.env.ETHERSCAN_API_KEY || "",
-  },
-
-  paths: {
-    sources: "./contracts",
-    tests: "./test",
-    cache: "./cache",
-    artifacts: "./artifacts",
-  },
-
-  gasReporter: {
-    enabled: process.env.REPORT_GAS === "true",
-    currency: "USD",
-    coinmarketcap: process.env.COINMARKETCAP_API_KEY,
   },
 };
