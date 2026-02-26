@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Home, User, Shield, Lock, Wallet, LogOut, Loader2 } from 'lucide-react';
+import { Home, User, Shield, Lock, Wallet, LogOut, Loader2, Send, Download, Key } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/hooks/use-toast';
@@ -16,6 +16,9 @@ const navItems = [
   { to: '/profile', label: 'Profile', icon: User },
   { to: '/kyc', label: 'KYC Verification', icon: Shield },
   { to: '/zkproof', label: 'ZK Proof', icon: Lock },
+  { to: '/send-file', label: 'Send File', icon: Send },
+  { to: '/receive-file', label: 'Receive File', icon: Download },
+  { to: '/register-key', label: 'Register Key', icon: Key },
 ];
 
 export const Navigation = () => {

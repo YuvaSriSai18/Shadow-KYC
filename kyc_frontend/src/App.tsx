@@ -13,6 +13,9 @@ import KYCDashboard from "./pages/KYCDashboard";
 import ZKProof from "./pages/ZKProof";
 import ServiceTest from "./pages/ServiceTest";
 import NotFound from "./pages/NotFound";
+import SendFile from "./pages/SendFile";
+import ReceiveFile from "./pages/ReceiveFile";
+import RegisterEncryptionKey from "./pages/RegisterEncryptionKey";
 
 const queryClient = new QueryClient();
 
@@ -41,6 +44,9 @@ const App = () => {
               <Route path="/kyc" element={<KYCDashboard />} />
               <Route path="/zkproof" element={<ZKProof />} />
               <Route path="/test-services" element={<ServiceTest />} />
+              <Route path="/send-file" element={<SendFile />} />
+              <Route path="/receive-file" element={<ReceiveFile />} />
+              <Route path="/register-key" element={<RegisterEncryptionKey />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </div>
